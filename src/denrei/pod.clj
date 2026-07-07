@@ -28,8 +28,39 @@
             [denrei.kotoba :as kotoba]
             [langchain.db :as d]
             [langchain.kotoba-db :as kdb])
-  (:import [java.time Instant]
+  (:import [java.security MessageDigest]
+           [java.time Instant]
+           [java.time.temporal ChronoUnit]
            [java.util UUID]))
+
+;; ───────── fleet-node graph addressing (kotoba-server, kotoba-core/cid) ─────────
+
+(def ^:private b32-alphabet "abcdefghijklmnopqrstuvwxyz234567")
+
+(defn- base32-lower-no-pad [^bytes bs]
+  (let [bits (mapcat (fn [b] (map #(bit-and 1 (bit-shift-right (bit-and b 0xff) %))
+                                  (range 7 -1 -1)))
+                     bs)]
+    (apply str (map (fn [chunk] (nth b32-alphabet (reduce (fn [a x] (+ (* 2 a) x)) 0 chunk)))
+                    (partition 5 5 (repeat 0) bits)))))
+
+(defn graph-cid-from-name
+  "kotoba-core KotobaCid/from_bytes over a graph name: CIDv1/dag-cbor/sha2-256
+  header (0x01 0x71 0x12 0x20) + sha256(name), multibase base32-lower 'b'."
+  [^String nm]
+  (let [h (.digest (MessageDigest/getInstance "SHA-256") (.getBytes nm "UTF-8"))]
+    (str "b" (base32-lower-no-pad
+              (byte-array (concat [0x01 0x71 0x12 0x20] (seq h)))))))
+
+(defn private-graph-cid
+  "The actor's account-owned private graph on a fleet kotoba-server:
+  NamedGraph::private_for(did) = CID of \"kotoba://graph/private/<did>\".
+  A datomic.transact scoped to exactly this CID auto-registers the graph
+  Private{owner = CACAO issuer} on first write (kotoba-server xrpc.rs, data-
+  sovereignty path) — the CID binds to the DID, so only the matching issuer
+  can ever claim it. Verified live against a murakumo fleet node 2026-07-07."
+  [did]
+  (graph-cid-from-name (str "kotoba://graph/private/" did)))
 
 (def schema
   "Datom schema for the kaisha pod graph. Also usable to seed an in-process
@@ -76,7 +107,11 @@
              (-> (pull* db [:kaisha-msg/edn] [:kaisha-msg/id message-id])
                  :kaisha-msg/edn dec*))
            (propose-revision! [_ message-id content]
-             (tx* db [{:kaisha-proposal/id message-id
+             ;; explicit :db/id — a fleet kotoba-server's transact dialect
+             ;; requires it ("entity map must contain :db/id", observed live
+             ;; 2026-07-07); langchain.db accepts it identically.
+             (tx* db [{:db/id (str "kaisha-proposal/" message-id)
+                       :kaisha-proposal/id message-id
                        :kaisha-proposal/edn (enc content)}])
              {:proposal-id (str "denrei-pod/" message-id)})
            (post! [_ message-id content]
@@ -84,7 +119,8 @@
                ;; durable fan-out fact FIRST — if the pod transact throws,
                ;; nothing claims the post happened (mirrors denrei.operation's
                ;; effect-before-record ordering one level down).
-               (tx* db [{:kaisha-msg/id message-id
+               (tx* db [{:db/id (str "kaisha-msg/" message-id)
+                         :kaisha-msg/id message-id
                          :kaisha-msg/channel (channel-key (:space rec) (:channel rec))
                          :kaisha-msg/edn (enc rec)}])
                (deliverer rec)
@@ -109,25 +145,37 @@
                      (posting writes datoms, so the default grant is
                      transact, not read).
    opts:
-     :url   pod base URL (e.g. \"http://asher:8080\" on the tailnet)
+     :url   pod base URL (e.g. \"http://asher:8077\" on the tailnet)
+     :aud   CACAO audience for the self-mint (default :url). A murakumo
+            fleet kotoba-server verifies the audience against its own node
+            DID (did:key of the node identity) — pass that DID here; the
+            node discloses it in the 401 body on mismatch.
      :graph target named graph (default: the actor identity's own
-            key-derived IPNS name)
+            key-derived IPNS name; a fleet node requires a canonical graph
+            CID — see e.g. syosetsuka.cacao/canonical-graph)
      :db-name tenant database name (live-edge tenant writes; see
             langchain.kotoba-db/kotoba-conn)
      :json-write :json-read injected JSON fns (e.g. data.json)
      :grant {:cap ... :scope ...} (default transact on :graph)
      :http-fn optional override (defaults to denrei.kotoba/jvm-http-fn)
      :deliverer optional post-transact hook"
-  [{:keys [url graph db-name json-write json-read token cacao did identity
+  [{:keys [url aud graph db-name json-write json-read token cacao did identity
            grant http-fn deliverer]}]
   (let [graph (or graph (:graph identity))
         [cacao did]
         (if identity
-          (let [now (str (Instant/now))
-                g   (or grant {:cap :cap/transact :scope graph})]
-            [(cacao/mint identity g {:aud url :nonce (str (UUID/randomUUID))
-                                     :issued-at now
-                                     :expiry (str (.plusSeconds (Instant/now) 3600))})
+          ;; fleet kotoba-server rejects fractional-second timestamps
+          ;; ("must be YYYY-MM-DDTHH:MM:SSZ UTC") — truncate to seconds.
+          ;; default grant covers the target's full surface: reads
+          ;; (fetch-message/channel-messages → datom:read), writes
+          ;; (datom:transact), and first-write graph creation (tx:create) —
+          ;; a fleet node checks all of them (observed live 2026-07-07).
+          (let [now-i (.truncatedTo (Instant/now) ChronoUnit/SECONDS)
+                g     (or grant {:cap [:cap/read :cap/transact :cap/admin]
+                                 :scope graph})]
+            [(cacao/mint identity g {:aud (or aud url) :nonce (str (UUID/randomUUID))
+                                     :issued-at (str now-i)
+                                     :expiry (str (.plusSeconds now-i 3600))})
              (:did identity)])
           [cacao did])
         host-caps {:http-fn (or http-fn kotoba/jvm-http-fn)
@@ -138,3 +186,34 @@
                                           cacao   (assoc :cacao cacao :did did)
                                           db-name (assoc :db-name db-name)))]
     (db-channelport api conn (or deliverer (fn [_] nil)))))
+
+(defn fleet-channelport
+  "kotoba-channelport against a murakumo fleet node, with every fleet-node
+  requirement pre-wired (all verified live against asher 2026-07-07,
+  ADR-2607072400):
+    - graph = the actor's account-owned private graph
+      (`private-graph-cid` — auto-registers Private{owner=actor} on first
+      write; the node rejects IPNS names / libp2p-key CIDs as graph params)
+    - CACAO aud = the NODE's did:key (:node-did — the node discloses it in
+      the 401 body on mismatch), not the URL
+    - multi-cap grant [read transact tx:create] (the node checks
+      datom:transact AND tx:create on a first write, datom:read on reads)
+    - second-precision CACAO timestamps (fractional seconds rejected)
+
+  opts: :url (e.g. \"http://100.x.y.z:8077\" on the tailnet — fleet.edn's
+  :fleet/port default is 8077), :identity (denrei.cacao identity),
+  :node-did, :json-write :json-read, optional :deliverer."
+  [{:keys [identity node-did] :as opts}]
+  (let [did  (:did identity)
+        gcid (private-graph-cid did)]
+    (kotoba-channelport
+     (-> opts
+         (dissoc :node-did)
+         (assoc :aud node-did
+                :graph gcid
+                ;; the node's WRITE path scope-checks the graph CID, but its
+                ;; READ path canonicalizes a registered graph to its name form
+                ;; ("private/<did>") before the scope check (observed live
+                ;; 2026-07-07) — grant both so one CACAO covers both.
+                :grant {:cap [:cap/read :cap/transact :cap/admin]
+                        :scope [gcid (str "private/" did)]})))))

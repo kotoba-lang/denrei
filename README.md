@@ -67,8 +67,41 @@ clojure -M:lint
 - **Advisor** — `mock-advisor` (deterministic) ‖ `llm-advisor`
   (langchain.model ChatModel).
 - **ChannelTarget** — `mock-channelport` (in-memory, injectable deliverer) ‖
-  a live kaisha host (kotoba-server XRPC / UI) as follow-up.
+  **`denrei.pod`** (LIVE — see below).
 - **Phase** — 0 ingest-only → 1 assisted → 2/3 assisted-draft; posting is
   never phase-autonomous.
 
-See ADR-2607072330 (denrei) and ADR-2607072310 (kaisha).
+## Live pod (`denrei.pod`, ADR-2607072400)
+
+`denrei.pod` is the live ChannelTarget: `post!` transacts the governed
+delivery record into a **kaisha pod** — a kotoba-server datom graph — indexed
+by channel (`:kaisha-msg/channel`), so the graph itself is the fan-out
+substrate (`channel-messages` is the reference consumer query). It speaks
+only the langchain.db `:db-api` map, so the in-process backend (tests) and a
+real pod (production) are the same code path.
+
+`fleet-channelport` pre-wires every murakumo-fleet-node requirement, each
+verified live against `asher` (2026-07-07): graph = the actor's
+account-owned private graph (`private-graph-cid`, auto-registered
+`Private{owner=actor}` on first write), CACAO `aud` = the node's did:key,
+multi-cap grant (`datom:read` + `datom:transact` + `tx:create`), dual graph
+scope (the node's write path checks the CID, its read path the
+`private/<did>` name form), second-precision timestamps, explicit `:db/id`
+in tx maps.
+
+```clojure
+(def tm (pod/fleet-channelport
+         {:url "http://<node>:8077"            ; tailnet; murakumo fleet.edn :fleet/port
+          :identity (cacao/load-or-create-identity! ".denrei/identity.edn")
+          :node-did "did:key:z6Mk..."          ; the node's DID (disclosed in its 401)
+          :json-write json/write-str
+          :json-read #(json/read-str % :key-fn keyword)}))
+(op/build store {:channelport (:target tm)})   ; the actor now posts to the live pod
+(pod/channel-messages tm "gftd" "general")     ; fan-out consumer read
+```
+
+Remaining follow-up: a lattice `on-kse` WASM component for push-based
+realtime fan-out (the pull-based substrate above is live).
+
+See ADR-2607072330 (denrei), ADR-2607072310 (kaisha), ADR-2607072400 (pod
+deployment).

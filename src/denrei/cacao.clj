@@ -27,8 +27,17 @@
 
 (def ^:private cap->op {:cap/read "datom:read" :cap/transact "datom:transact" :cap/admin "tx:create"})
 
-(defn grant->resources [{:keys [cap scope]}]
-  [(str "kotoba://op/" (cap->op cap)) (str "kotoba://graph/" scope)])
+(defn grant->resources
+  "Resources for a grant. :cap accepts a single keyword (byte-identical to
+  the shared kotoba.cacao copy) or a collection of caps — a murakumo fleet
+  kotoba-server checks datom:transact AND tx:create on a first write to a
+  fresh graph (observed live 2026-07-07), so multi-cap CACAOs are needed
+  there; kotobase.net single-cap callers are unaffected."
+  [{:keys [cap scope]}]
+  (let [caps   (if (coll? cap) cap [cap])
+        scopes (if (coll? scope) scope [scope])]
+    (into (mapv #(str "kotoba://op/" (cap->op %)) caps)
+          (map #(str "kotoba://graph/" %) scopes))))
 
 (defn grant->payload [grant {:keys [iss aud nonce issued-at expiry domain version statement]
                              :or {domain "gftd.office" version "1"}}]
