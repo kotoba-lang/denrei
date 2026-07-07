@@ -57,6 +57,32 @@
                    (channelport/post! target "msg-1" (content "msg-1" "hello"))))
       (is (empty? @delivered)))))
 
+(deftest messages-since-is-a-loss-free-cursor-tail
+  (let [{:keys [target] :as cp} (pod/in-process-channelport)
+        r1 (channelport/post! target "msg-1" (content "msg-1" "first"))
+        _  (channelport/post! target "msg-2"
+             (assoc-in (content "msg-2" "second") [:message :kaisha/at] "2026-07-13T10:00:00Z"))]
+    (is (= ["msg-1" "msg-2"] (mapv :message-id (pod/messages-since cp "gftd" "general" nil)))
+        "nil cursor replays from the beginning (durable record, not an ephemeral tail)")
+    (is (= ["msg-2"] (mapv :message-id
+                           (pod/messages-since cp "gftd" "general" (pod/message-cursor r1)))))
+    (is (= [] (pod/messages-since cp "gftd" "general"
+                                  (pod/message-cursor
+                                   (last (pod/channel-messages cp "gftd" "general"))))))))
+
+(deftest follow!-delivers-new-posts-and-stops
+  (let [{:keys [target] :as cp} (pod/in-process-channelport)
+        seen (atom [])
+        stop (pod/follow! cp "gftd" "general" #(swap! seen conj (:message-id %))
+                          {:interval-ms 25})]
+    (try
+      (channelport/post! target "msg-1" (content "msg-1" "hello"))
+      (let [deadline (+ (System/currentTimeMillis) 3000)]
+        (while (and (empty? @seen) (< (System/currentTimeMillis) deadline))
+          (Thread/sleep 10)))
+      (is (= ["msg-1"] @seen) "the follower saw the post exactly once")
+      (finally (stop)))))
+
 (deftest full-actor-run-lands-the-post-on-the-pod-graph
   (testing "denrei's real ChannelActor, wired to the pod target: draft
             auto-commits, post interrupts for a human, approval lands the

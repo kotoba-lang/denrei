@@ -98,10 +98,16 @@ in tx maps.
           :json-read #(json/read-str % :key-fn keyword)}))
 (op/build store {:channelport (:target tm)})   ; the actor now posts to the live pod
 (pod/channel-messages tm "gftd" "general")     ; fan-out consumer read
+(pod/follow! tm "gftd" "general" prn)          ; incremental tail (returns a stop fn)
 ```
 
-Remaining follow-up: a lattice `on-kse` WASM component for push-based
-realtime fan-out (the pull-based substrate above is live).
+Realtime follow is `messages-since`/`follow!` — cursor-based incremental
+reads on the **same `:db-api` contract**, i.e. the datom-plane common
+denominator shared by kotobase / kotoba-peer / a fleet kotoba-server.
+Deliberately **no KSE/LiveBus dependency**: KSE is a kotoba-server-runtime
+facility (absent from the workerd/browser kotobase engines) and its datomic
+live-tail is ephemeral with no catch-up, so it cannot be the fan-out's
+source of truth (ADR-2607072400 addendum).
 
 See ADR-2607072330 (denrei), ADR-2607072310 (kaisha), ADR-2607072400 (pod
 deployment).

@@ -15,10 +15,12 @@
   form denrei.channelport/delivery-record builds — mention set included) into
   the pod graph as durable datoms, indexed by channel
   (`:kaisha-msg/channel` = \"<space>/<channel>\"). Fan-out consumers (a
-  murakumo lattice `on-kse` WASM component, a kaisha UI, another actor) read
-  that index — `channel-messages` below is the reference query. The pod graph
-  IS the fan-out substrate; no side-channel webhook to keep consistent with
-  what was governed.
+  kaisha UI, another actor, a follower process) read that index —
+  `channel-messages` is the reference query, `messages-since`/`follow!` the
+  incremental tail. The pod graph IS the fan-out substrate; no side-channel
+  event bus to keep consistent with what was governed, and deliberately NO
+  KSE/LiveBus dependency (kotoba-server-runtime-only, ephemeral, absent from
+  the kotobase/kotoba-peer engines — ADR-2607072400 addendum).
 
   post! is only ever called by denrei.operation's commit step, after human
   approval — same charter as every other ChannelTarget."
@@ -80,8 +82,9 @@
 
 (defn channel-messages
   "Reference fan-out read: every delivery record posted to <space>/<channel>,
-  oldest first (by :at, then id) — the query an on-kse component / kaisha UI
-  runs against the pod graph. `target` is the map returned by db-channelport."
+  oldest first (by :at, then id) — the query any consumer (kaisha UI, another
+  actor) runs against the pod graph. `target` is the map returned by
+  db-channelport."
   [{:keys [db] :as _target} space channel]
   (->> (q* db '[:find [?edn ...]
                 :in $ ?c
@@ -91,6 +94,55 @@
        (map dec*)
        (sort-by (juxt :at :message-id))
        vec))
+
+(defn message-cursor
+  "The follow cursor for a delivery record: [(:at rec) (:message-id rec)] —
+  the same (at, id) order channel-messages sorts by."
+  [rec]
+  [(:at rec) (:message-id rec)])
+
+(defn messages-since
+  "Portable incremental tail over the channel index — the datom-plane COMMON
+  DENOMINATOR (ADR-2607072400 addendum): it speaks only the langchain.db
+  `:db-api` contract, so the identical code follows a fleet kotoba-server, the
+  kotobase edge, a kotobase-peer engine, or the in-process test backend. No
+  KSE/LiveBus dependency — KSE is a kotoba-server/lattice runtime facility
+  that does not exist in the workerd/browser kotobase engines, and its
+  datomic live-tail is ephemeral (no catch-up); this read is replayable and
+  loss-free by construction (the graph is the durable record).
+
+  `cursor` is `message-cursor` of the last record already seen (nil = from
+  the beginning). Returns the newer records, oldest first."
+  [target space channel cursor]
+  (let [msgs (channel-messages target space channel)]
+    (if (nil? cursor)
+      msgs
+      (vec (filter #(pos? (compare (message-cursor %) cursor)) msgs)))))
+
+(defn follow!
+  "Poll-based follow over `messages-since` — realtime-enough fan-out on the
+  common datom-plane contract alone. Invokes `callback` with each new
+  delivery record (oldest first), tracking the cursor internally. Returns a
+  zero-arg stop fn. opts: :interval-ms (default 2000), :cursor (start after
+  this cursor instead of replaying history)."
+  [target space channel callback & [{:keys [interval-ms cursor]
+                                     :or   {interval-ms 2000}}]]
+  (let [running (atom true)
+        worker  (Thread.
+                 (fn []
+                   (loop [cur cursor]
+                     (when @running
+                       (let [cur' (try
+                                    (let [new (messages-since target space channel cur)]
+                                      (doseq [rec new] (callback rec))
+                                      (if (seq new) (message-cursor (last new)) cur))
+                                    (catch Exception _ cur))] ; transient read error → retry next tick
+                         (Thread/sleep (long interval-ms))
+                         (recur cur')))))
+                 (str "denrei-pod-follow:" space "/" channel))]
+    (.setDaemon worker true)
+    (.start worker)
+    (fn [] (reset! running false))))
 
 (defn db-channelport
   "A denrei.channelport/ChannelTarget over any langchain.db `:db-api` conn.
