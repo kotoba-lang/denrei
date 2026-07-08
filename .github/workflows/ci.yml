@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: clojure -M:test (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['17', '21']
+    steps:
+      # denrei's deps.edn :deps resolves io.github.kotoba-lang/kaisha via a
+      # :local/root sibling path (../kaisha) rather than a git dep (ADR-2607072330:
+      # denrei holds kaisha.model verbatim, does not reimplement it), so CI has to
+      # reproduce that orgs/kotoba-lang/<repo> layout instead of a single checkout.
+      - name: Checkout denrei
+        uses: actions/checkout@v4
+        with:
+          path: work/orgs/kotoba-lang/denrei
+
+      - name: Checkout kaisha sibling
+        uses: actions/checkout@v4
+        with:
+          repository: kotoba-lang/kaisha
+          path: work/orgs/kotoba-lang/kaisha
+
+      - name: Setup JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Setup Clojure CLI
+        uses: DeLaGuardo/setup-clojure@13.1
+        with:
+          cli: latest
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache m2 / gitlibs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2
+            ~/.gitlibs
+          key: ${{ runner.os }}-jdk${{ matrix.java }}-clj-${{ hashFiles('work/orgs/kotoba-lang/denrei/deps.edn') }}
+          restore-keys: |
+            ${{ runner.os }}-jdk${{ matrix.java }}-clj-
+
+      - name: Run tests
+        working-directory: work/orgs/kotoba-lang/denrei
+        run: clojure -M:test
+
+      - name: Lint (clj-kondo)
+        working-directory: work/orgs/kotoba-lang/denrei
+        run: clojure -M:lint
