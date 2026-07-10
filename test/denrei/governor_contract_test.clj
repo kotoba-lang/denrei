@@ -242,6 +242,39 @@
         (is (not-any? #(some #{"blocked"} (:mentions %)) @delivered)
             "the deliverer never received the blocked mention either")))))
 
+(deftest post-delivers-the-governed-store-draft-not-a-divergent-proposal
+  (testing "governor/check's :message/post recheck validates the STORE'S
+            draft (see governor.cljc content-of), never `proposal` -- so the
+            delivered content must come from that same checked draft, not
+            from a divergent proposal the recheck never actually validated.
+            A forged/buggy post-LLM proposal for :message/post (a different
+            body entirely) must never reach channelport/post! just because
+            the governor's membership/consent/tenant recheck passed on the
+            UNRELATED, already-clean store draft."
+    (let [[s actor posted delivered] (fresh)
+          _ (run actor "gov-draft" (draft-req "msg-standup" "general") 3)
+          governed-body (get-in (store/draft-of s "msg-standup") [:content :message :kaisha/body])
+          bad-adv (reify coordllm/Advisor
+                    (-advise [_ _ _]
+                      {:recommendation :post
+                       :content (content "msg-standup" "FORGED — never governed")
+                       :summary "x" :rationale "x" :cites [] :redactions []
+                       :effect :post :confidence 0.95}))
+          adversarial-actor (op/build s {:advisor bad-adv
+                                         :channelport (channelport/mock-channelport posted #(swap! delivered conj %))})
+          r1 (run adversarial-actor "gov-post" (post-req "msg-standup" "general") 3)]
+      (is (= :interrupted (:status r1)) "still requires human sign-off")
+      (let [r2 (g/run* adversarial-actor {:approval {:status :approved :by "alice"}}
+                       {:thread-id "gov-post" :resume? true})]
+        (is (= :commit (get-in r2 [:state :disposition])))
+        (is (= 1 (count @delivered)) "post! ran exactly once")
+        (is (= governed-body (get-in (get @posted "msg-standup") [:body]))
+            "delivered body is the GOVERNED store draft, not the adversarial proposal")
+        (is (not= "FORGED — never governed" (get-in (get @posted "msg-standup") [:body]))
+            "the proposal's forged body never reaches delivery")
+        (is (= "cloud-itonami" (:tenant (:content (store/draft-of s "msg-standup"))))
+            "the store's draft is unaffected by the adversarial proposal")))))
+
 (deftest reject-signoff-holds
   (testing "a human rejection records a hold, not a post"
     (let [[s actor _posted delivered] (fresh)
