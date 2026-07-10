@@ -191,11 +191,19 @@
 
 (defn check
   "Censors a post-LLM proposal for a denrei op. Returns
-   {:ok? :violations :confidence :hard? :escalate? :high-stakes? :duplicates}.
+   {:ok? :violations :confidence :hard? :escalate? :high-stakes? :duplicates
+    :checked-content}.
 
    Hard violations force HOLD and cannot be overridden. Posting a message is
    high-stakes → human sign-off even when clean; so is any draft mentioning a
-   first-contact? member."
+   first-contact? member.
+
+   `:checked-content` is the exact value this check validated (`content-of`
+   above) -- for `:message/post` that's the store's `draft-of`, fetched fresh
+   here, NOT `proposal`. The caller MUST deliver this value, not `proposal`:
+   `content-of` deliberately distrusts the proposal for `:message/post` (see
+   above), so building the delivered record from `proposal` instead of
+   `:checked-content` would validate one map and deliver a different one."
   [request proposal st]
   (let [op      (:op request)
         content (content-of request proposal st)
@@ -221,13 +229,14 @@
         dups    (when content (duplicate-body-conflicts st (:message request) content))
         stakes? (or (= :message/post op) (boolean (seq (high-stakes-mentions st content))))
         hard?   (boolean (seq hard))]
-    {:ok?          (and (not hard?) (not low?) (not stakes?) (empty? dups))
-     :violations   hard
-     :confidence   conf
-     :hard?        hard?
-     :escalate?    (and (not hard?) (or low? stakes? (seq dups)))
-     :high-stakes? stakes?
-     :duplicates   dups}))
+    {:ok?             (and (not hard?) (not low?) (not stakes?) (empty? dups))
+     :violations      hard
+     :confidence      conf
+     :hard?           hard?
+     :escalate?       (and (not hard?) (or low? stakes? (seq dups)))
+     :high-stakes?    stakes?
+     :duplicates      dups
+     :checked-content content}))
 
 (defn hold-fact [request verdict]
   {:t :denrei-hold :op (:op request) :subject (:message request)
