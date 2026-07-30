@@ -15,7 +15,8 @@
         ;; the kaisha.model space/message EDN denrei holds verbatim as :draft
         ;; content — denrei does NOT reimplement it (ADR-2607072330).
         io.github.kotoba-lang/kaisha
-        {:local/root "../kaisha"}}
+        {:git/url "https://github.com/kotoba-lang/kaisha.git"
+                                     :git/sha "151ee34f594a140efd16f91b3ec14b1b72fb9a49"}}
  :aliases
  {;; offline workspace dev — pin transitive langchain to local checkout
   :dev {:override-deps
