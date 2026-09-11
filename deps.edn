@@ -26,7 +26,7 @@
  {;; offline workspace dev — pin transitive langchain to local checkout
   :dev {:override-deps
         {io.github.kotoba-lang/langchain {:local/root "../langchain"}}}
-  ;; clojure -M:dev:run  → drive a channel post through one ChannelActor
+  ;; kbb -M:dev:run  → drive a channel post through one ChannelActor
   :run {:main-opts ["-m" "denrei.sim"]}
   :test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
