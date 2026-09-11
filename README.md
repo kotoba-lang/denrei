@@ -46,7 +46,7 @@ draft time).
 TOCTOU-safe: the content a human approves at govern-time is checkpointed and
 is exactly what `post!` delivers — a concurrent draft mutation while the
 approval sits in the interrupt queue never changes what goes out
-(`test/denrei/governor_contract_test.clj`).
+(`test/denrei/governor_contract_test.cljk`).
 
 ## Run
 

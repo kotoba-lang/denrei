@@ -1,7 +1,7 @@
 (ns denrei.query-parity-test
   "Parity test: the portable .kotoba slice (src/denrei/query.kotoba) must
   produce the same observable status strings / posted? booleans as the
-  original Clojure slice (src/denrei/query.cljc).
+  original Clojure slice (src/denrei/query.cljk).
 
   The Clojure side reads a draft's :status out of a seeded denrei Store and
   reduces it; the .kotoba side receives that draft :status verbatim (as a
