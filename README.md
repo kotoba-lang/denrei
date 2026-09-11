@@ -51,9 +51,9 @@ approval sits in the interrupt queue never changes what goes out
 ## Run
 
 ```bash
-clojure -M:dev:test    # 31 tests / 129 assertions
-clojure -M:dev:run     # drive the demo storyline (ingest → draft → post → holds)
-clojure -M:lint
+kbb -M:dev:test    # 31 tests / 129 assertions
+kbb -M:dev:run     # drive the demo storyline (ingest → draft → post → holds)
+kbb -M:lint
 ```
 
 ## Swap points

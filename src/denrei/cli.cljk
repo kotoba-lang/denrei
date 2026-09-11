@@ -4,7 +4,7 @@
   process boundary consumer that needs one message's draft status without an
   in-process require across runtimes.
 
-  Usage: `clojure -M -m denrei.cli <ledger.edn> <message-id>` — prints the
+  Usage: `kbb -M -m denrei.cli <ledger.edn> <message-id>` — prints the
   draft status (\"proposed\"/\"posted\"/\"none\") and exits 0 on \"posted\", 1
   otherwise (so callers can also just check the exit code).
 
