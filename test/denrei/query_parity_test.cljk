@@ -11,7 +11,7 @@
 
   The .kotoba file is compiled for real with the amu compiler (--target
   js-browser), and the compiled artifact is actually executed under node."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.edn :as edn]
