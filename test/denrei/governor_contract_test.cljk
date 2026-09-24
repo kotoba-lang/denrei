@@ -4,7 +4,7 @@
   Invariant: the actor never posts what the MembershipGovernor would reject;
   drafting never auto-actuates; posting always routes to a human regardless
   of phase; membership makes private channels structurally unreachable."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [langgraph.graph :as g]
             [kaisha.model :as k]
             [denrei.store :as store]

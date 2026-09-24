@@ -4,7 +4,7 @@
   `kaisha.model/mentions` parser the governor's consent-violations used,
   never from a proposal-supplied list, so a proposal cannot smuggle a
   recipient the governor never inspected."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kaisha.model :as k]
             [denrei.channelport :as channelport]))
 

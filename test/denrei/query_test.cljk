@@ -1,5 +1,5 @@
 (ns denrei.query-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [denrei.query :as query]
             [denrei.store :as store]))
 

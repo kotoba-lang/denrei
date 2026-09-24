@@ -5,7 +5,7 @@
   ADR-2607072400), so what passes here holds against the pod by the api
   contract (the same argument denrei.store's MemStore ≡ DatomicStore
   contract test makes for the SSoT)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kaisha.model :as k]
             [langgraph.graph :as g]
             [denrei.channelport :as channelport]
