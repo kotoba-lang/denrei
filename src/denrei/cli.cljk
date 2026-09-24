@@ -10,7 +10,7 @@
 
   <ledger.edn> holds the same shape as `denrei.store/demo-data`'s :drafts map
   (at minimum {:drafts {\"<message-id>\" {:status :posted}}})."
-  (:require [clojure.edn :as edn]
+  (:require [kotoba.lang.edn :as edn]
             [denrei.query :as query]
             [denrei.store :as store]))
 

@@ -14,7 +14,7 @@
   (:require [kotoba.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
-            [clojure.edn :as edn]
+            [kotoba.lang.edn :as edn]
             [denrei.query :as query]
             [denrei.store :as store]))
 
