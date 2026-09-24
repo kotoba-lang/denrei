@@ -24,7 +24,7 @@
 
   post! is only ever called by denrei.operation's commit step, after human
   approval — same charter as every other ChannelTarget."
-  (:require [clojure.edn :as edn]
+  (:require [kotoba.lang.edn :as edn]
             [denrei.cacao :as cacao]
             [denrei.channelport :as channelport]
             [denrei.kotoba :as kotoba]
